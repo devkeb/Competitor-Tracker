@@ -8,7 +8,6 @@ from app.repository import get_collection_jobs, save_snapshot
 
 logger = logging.getLogger(__name__)
 
-
 def run_collection() -> None:
     settings = load_settings()
     jobs = get_collection_jobs()
