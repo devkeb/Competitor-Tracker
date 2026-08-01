@@ -1,0 +1,4 @@
+playwright
+psycopg[binary,pool]
+python-dotenv
+schedule
