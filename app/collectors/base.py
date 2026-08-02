@@ -3,8 +3,9 @@ from datetime import date
 
 from app.models import CollectionResult
 
+
 class BaseCollector(ABC):
-    """Base interface for all accommodation collectors."""
+    """Base interface for accommodation collectors."""
 
     @abstractmethod
     def collect(
@@ -15,9 +16,6 @@ class BaseCollector(ABC):
         check_out: date,
         guests: int,
     ) -> CollectionResult:
-        """
-        Collect availability and pricing information.
+        """Collect availability and pricing information for one listing."""
 
-        Every platform-specific collector must implement this method.
-        """
         raise NotImplementedError

@@ -1,4 +1,6 @@
+from datetime import date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
@@ -6,41 +8,134 @@ from psycopg.types.json import Jsonb
 from app.database import pool
 from app.models import CollectionResult
 
+MANILA_TIMEZONE = ZoneInfo("Asia/Manila")
 
-def get_collection_jobs() -> list[dict[str, Any]]:
-    """
-    Load every active property and active search-profile combination.
 
-    Each returned row becomes one collection job.
+def manila_today() -> date:
+    """Return the current calendar date in the Philippines."""
+
+    return datetime.now(MANILA_TIMEZONE).date()
+
+
+def get_year_end_window(today: date | None = None) -> tuple[date, date] | None:
     """
+    Return the inclusive check-in start and final check-out date.
+
+    Daily profiles are one-night stays. For example, a final check-out of
+    December 31 means the final check-in is December 30.
+    """
+
+    start_date = today or manila_today()
+    final_check_out = date(start_date.year, 12, 31)
+
+    if start_date >= final_check_out:
+        return None
+
+    return start_date, final_check_out
+
+
+def ensure_daily_search_profiles_until_year_end(
+    guest_count: int = 2,
+    today: date | None = None,
+) -> int:
+    """Create or reactivate one-night profiles through December 31."""
+
+    if guest_count < 1:
+        raise ValueError("guest_count must be at least 1.")
+
+    window = get_year_end_window(today)
+    if window is None:
+        return 0
+
+    start_date, final_check_out = window
+    profiles: list[dict[str, Any]] = []
+    check_in = start_date
+
+    while check_in < final_check_out:
+        check_out = check_in + timedelta(days=1)
+
+        profiles.append(
+            {
+                "name": (
+                    f"Daily availability - {check_in.isoformat()} - "
+                    f"{guest_count} guest(s)"
+                ),
+                "check_in": check_in,
+                "check_out": check_out,
+                "guest_count": guest_count,
+            }
+        )
+        check_in = check_out
+
+    query = """
+        INSERT INTO public.search_profiles (
+            name,
+            check_in,
+            check_out,
+            guest_count,
+            active
+        )
+        VALUES (
+            %(name)s,
+            %(check_in)s,
+            %(check_out)s,
+            %(guest_count)s,
+            TRUE
+        )
+        ON CONFLICT (check_in, check_out, guest_count)
+        DO UPDATE SET
+            name = EXCLUDED.name,
+            active = TRUE,
+            updated_at = NOW();
+    """
+
+    with pool.connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.executemany(query, profiles)
+        conn.commit()
+
+    return len(profiles)
+
+
+def get_collection_jobs(
+    start_date: date,
+    final_check_out: date,
+    guest_count: int,
+) -> list[dict[str, Any]]:
+    """Load every active listing and generated daily profile combination."""
 
     query = """
         SELECT
             property.id AS property_id,
             property.name AS property_name,
             property.listing_url,
-
             profile.id AS search_profile_id,
             profile.name AS search_profile_name,
             profile.check_in,
             profile.check_out,
             profile.guest_count
-
         FROM public.properties AS property
-
         CROSS JOIN public.search_profiles AS profile
-
         WHERE property.active = TRUE
           AND profile.active = TRUE
-
+          AND profile.guest_count = %(guest_count)s
+          AND profile.check_in >= %(start_date)s
+          AND profile.check_out <= %(final_check_out)s
+          AND profile.check_out = profile.check_in + 1
         ORDER BY
             property.id,
-            profile.id;
+            profile.check_in;
     """
+
+    parameters = {
+        "guest_count": guest_count,
+        "start_date": start_date,
+        "final_check_out": final_check_out,
+    }
 
     with pool.connection() as conn:
         with conn.cursor(row_factory=dict_row) as cursor:
-            cursor.execute(query)
+            cursor.execute(query, parameters)
             jobs = cursor.fetchall()
 
     return jobs
@@ -49,6 +144,8 @@ def get_collection_jobs() -> list[dict[str, Any]]:
 def save_snapshot(
     property_id: int,
     search_profile_id: int,
+    check_in: date,
+    check_out: date,
     result: CollectionResult,
 ) -> None:
     """Save one collected result into availability_snapshots."""
@@ -56,6 +153,8 @@ def save_snapshot(
     query = """
         INSERT INTO public.availability_snapshots (
             property_id,
+            check_in,
+            check_out,
             search_profile_id,
             status,
             currency,
@@ -66,6 +165,8 @@ def save_snapshot(
         )
         VALUES (
             %(property_id)s,
+            %(check_in)s,
+            %(check_out)s,
             %(search_profile_id)s,
             %(status)s,
             %(currency)s,
@@ -79,6 +180,8 @@ def save_snapshot(
     parameters = {
         "property_id": property_id,
         "search_profile_id": search_profile_id,
+        "check_in": check_in,
+        "check_out": check_out,
         "status": result.status,
         "currency": result.currency,
         "nightly_price": result.nightly_price,
@@ -90,5 +193,4 @@ def save_snapshot(
     with pool.connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(query, parameters)
-
         conn.commit()
