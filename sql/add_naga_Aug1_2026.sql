@@ -5,7 +5,6 @@ INSERT INTO properties (
     listing_url,
     municipality,
     province,
-    minimum_guests,
     maximum_guests,
     active
 )
@@ -157,7 +156,6 @@ SET
     name = EXCLUDED.name,
     municipality = EXCLUDED.municipality,
     province = EXCLUDED.province,
-    minimum_guests = EXCLUDED.minimum_guests,
     maximum_guests = EXCLUDED.maximum_guests,
     active = TRUE,
     updated_at = NOW();

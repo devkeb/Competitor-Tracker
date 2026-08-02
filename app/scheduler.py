@@ -21,7 +21,7 @@ def run_scheduled_collection() -> None:
         logger.exception("Scheduled collection failed.")
 
 
-def start_scheduler(run_time: str = "08:00") -> None:
+def start_scheduler(run_time: str = "01:58") -> None:
     """
     Start the daily scheduler.
 
@@ -50,4 +50,4 @@ if __name__ == "__main__":
         ),
     )
 
-    start_scheduler("08:00")
+    start_scheduler("01:58")

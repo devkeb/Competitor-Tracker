@@ -45,13 +45,6 @@ CREATE TABLE availability_snapshots (
 
     currency CHAR(3),
     nightly_price NUMERIC(12, 2),
-    total_price NUMERIC(12, 2),
-    cleaning_fee NUMERIC(12, 2),
-    service_fee NUMERIC(12, 2),
-
-    rating NUMERIC(3, 2),
-    review_count INTEGER,
-    minimum_nights INTEGER,
 
     result_message TEXT,
     raw_data JSONB,

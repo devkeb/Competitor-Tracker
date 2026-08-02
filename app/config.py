@@ -28,3 +28,11 @@ def load_settings() -> Settings:
             os.getenv("SCREENSHOT_ON_ERROR", "true").lower() == "true"
         ),
     )
+
+extractor_selectors: dict[str, str] = {
+    "property_card": '[data-testid="card-container"]',
+    "property_name": '[data-testid="listing-card-title"]',
+    "price": '[data-testid="price-availability-row"]',
+    "rating": '[aria-label*="rating"]',
+    "link": "a",
+}

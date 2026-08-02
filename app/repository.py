@@ -1,37 +1,49 @@
-import json
-from datetime import date
 from typing import Any
+
+from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
 from app.database import pool
 from app.models import CollectionResult
 
 
 def get_collection_jobs() -> list[dict[str, Any]]:
+    """
+    Load every active property and active search-profile combination.
+
+    Each returned row becomes one collection job.
+    """
+
     query = """
         SELECT
-            p.id AS property_id,
-            p.name AS property_name,
-            p.listing_url,
-            sp.id AS search_profile_id,
-            sp.check_in,
-            sp.check_out,
-            sp.guest_count
-        FROM properties p
-        CROSS JOIN search_profiles sp
-        WHERE p.active = TRUE
-          AND sp.active = TRUE
-        ORDER BY p.id, sp.id;
+            property.id AS property_id,
+            property.name AS property_name,
+            property.listing_url,
+
+            profile.id AS search_profile_id,
+            profile.name AS search_profile_name,
+            profile.check_in,
+            profile.check_out,
+            profile.guest_count
+
+        FROM public.properties AS property
+
+        CROSS JOIN public.search_profiles AS profile
+
+        WHERE property.active = TRUE
+          AND profile.active = TRUE
+
+        ORDER BY
+            property.id,
+            profile.id;
     """
 
     with pool.connection() as conn:
-        with conn.cursor() as cursor:
+        with conn.cursor(row_factory=dict_row) as cursor:
             cursor.execute(query)
-            columns = [column.name for column in cursor.description]
+            jobs = cursor.fetchall()
 
-            return [
-                dict(zip(columns, row))
-                for row in cursor.fetchall()
-            ]
+    return jobs
 
 
 def save_snapshot(
@@ -39,19 +51,15 @@ def save_snapshot(
     search_profile_id: int,
     result: CollectionResult,
 ) -> None:
+    """Save one collected result into availability_snapshots."""
+
     query = """
-        INSERT INTO availability_snapshots (
+        INSERT INTO public.availability_snapshots (
             property_id,
             search_profile_id,
             status,
             currency,
             nightly_price,
-            total_price,
-            cleaning_fee,
-            service_fee,
-            rating,
-            review_count,
-            minimum_nights,
             result_message,
             raw_data,
             screenshot_path
@@ -62,12 +70,6 @@ def save_snapshot(
             %(status)s,
             %(currency)s,
             %(nightly_price)s,
-            %(total_price)s,
-            %(cleaning_fee)s,
-            %(service_fee)s,
-            %(rating)s,
-            %(review_count)s,
-            %(minimum_nights)s,
             %(result_message)s,
             %(raw_data)s,
             %(screenshot_path)s
@@ -80,14 +82,8 @@ def save_snapshot(
         "status": result.status,
         "currency": result.currency,
         "nightly_price": result.nightly_price,
-        "total_price": result.total_price,
-        "cleaning_fee": result.cleaning_fee,
-        "service_fee": result.service_fee,
-        "rating": result.rating,
-        "review_count": result.review_count,
-        "minimum_nights": result.minimum_nights,
         "result_message": result.result_message,
-        "raw_data": json.dumps(result.raw_data),
+        "raw_data": Jsonb(result.raw_data),
         "screenshot_path": result.screenshot_path,
     }
 
