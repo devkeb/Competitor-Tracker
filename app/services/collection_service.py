@@ -1,13 +1,14 @@
 import logging
+from datetime import timedelta
 
 from playwright.sync_api import sync_playwright
 
 from app.collectors.airbnb import AirbnbCollector
 from app.config import load_settings
 from app.repository import (
-    ensure_daily_search_profiles_until_year_end,
+    ensure_daily_search_profiles,
     get_collection_jobs,
-    get_year_end_window,
+    get_collection_window,
     manila_today,
     save_snapshot,
 )
@@ -17,34 +18,33 @@ logger = logging.getLogger(__name__)
 
 def run_collection() -> None:
     """
-    Generate one-night profiles through year-end, check every active listing,
-    and save one snapshot for every listing/date combination.
+    Generate one-night profiles for the configured rolling window, check every
+    active listing, and save one snapshot for every listing/date combination.
     """
 
     logger.info("Loading application settings...")
     settings = load_settings()
 
     today = manila_today()
-    window = get_year_end_window(today)
+    start_date, final_check_out = get_collection_window(
+        today=today,
+        extraction_days=settings.extraction_days,
+    )
 
-    if window is None:
-        logger.warning(
-            "No one-night date range remains before December 31, %d.",
-            today.year,
-        )
-        return
-
-    start_date, final_check_out = window
+    final_check_in = final_check_out - timedelta(days=1)
 
     logger.info(
-        "Preparing one-night search profiles from %s through %s for %d guest(s)...",
+        "Preparing %d one-night search profile(s) from %s through %s "
+        "for %d guest(s)...",
+        settings.extraction_days,
         start_date,
-        final_check_out,
+        final_check_in,
         settings.daily_guest_count,
     )
 
-    profile_count = ensure_daily_search_profiles_until_year_end(
+    profile_count = ensure_daily_search_profiles(
         guest_count=settings.daily_guest_count,
+        extraction_days=settings.extraction_days,
         today=today,
     )
 

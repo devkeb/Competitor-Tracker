@@ -36,6 +36,7 @@ class Settings:
     screenshot_on_error: bool
     screenshot_on_unknown: bool
     daily_guest_count: int
+    extraction_days: int
 
 
 def load_settings() -> Settings:
@@ -52,4 +53,5 @@ def load_settings() -> Settings:
         screenshot_on_error=_read_bool("SCREENSHOT_ON_ERROR", True),
         screenshot_on_unknown=_read_bool("SCREENSHOT_ON_UNKNOWN", True),
         daily_guest_count=_read_positive_int("DAILY_GUEST_COUNT", 2),
+        extraction_days=_read_positive_int("EXTRACTION_DAYS", 30),
     )

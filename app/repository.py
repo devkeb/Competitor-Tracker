@@ -17,37 +17,48 @@ def manila_today() -> date:
     return datetime.now(MANILA_TIMEZONE).date()
 
 
-def get_year_end_window(today: date | None = None) -> tuple[date, date] | None:
+def get_collection_window(
+    today: date | None = None,
+    extraction_days: int = 30,
+) -> tuple[date, date]:
     """
-    Return the inclusive check-in start and final check-out date.
+    Return the rolling one-night collection window.
 
-    Daily profiles are one-night stays. For example, a final check-out of
-    December 31 means the final check-in is December 30.
+    The first check-in is tomorrow. ``extraction_days`` is the number of
+    consecutive check-in dates to generate. The returned second date is the
+    final check-out boundary (exclusive for check-in generation).
+
+    Example for 30 days:
+        first check-in = tomorrow
+        final check-in = tomorrow + 29 days
+        final check-out = tomorrow + 30 days
     """
 
-    start_date = today or manila_today()
-    final_check_out = date(start_date.year, 12, 31)
+    if extraction_days < 1:
+        raise ValueError("extraction_days must be at least 1.")
 
-    if start_date >= final_check_out:
-        return None
+    reference_date = today or manila_today()
+    start_date = reference_date + timedelta(days=1)
+    final_check_out = start_date + timedelta(days=extraction_days)
 
     return start_date, final_check_out
 
 
-def ensure_daily_search_profiles_until_year_end(
+def ensure_daily_search_profiles(
     guest_count: int = 2,
+    extraction_days: int = 30,
     today: date | None = None,
 ) -> int:
-    """Create or reactivate one-night profiles through December 31."""
+    """Create or reactivate one-night profiles for the rolling date window."""
 
     if guest_count < 1:
         raise ValueError("guest_count must be at least 1.")
 
-    window = get_year_end_window(today)
-    if window is None:
-        return 0
+    start_date, final_check_out = get_collection_window(
+        today=today,
+        extraction_days=extraction_days,
+    )
 
-    start_date, final_check_out = window
     profiles: list[dict[str, Any]] = []
     check_in = start_date
 
@@ -67,7 +78,7 @@ def ensure_daily_search_profiles_until_year_end(
         )
         check_in = check_out
 
-    query = """
+    insert_query = """
         INSERT INTO public.search_profiles (
             name,
             check_in,
@@ -89,9 +100,32 @@ def ensure_daily_search_profiles_until_year_end(
             updated_at = NOW();
     """
 
+    deactivate_query = """
+        UPDATE public.search_profiles
+        SET
+            active = FALSE,
+            updated_at = NOW()
+        WHERE guest_count = %(guest_count)s
+          AND active = TRUE
+          AND (
+                check_in < %(start_date)s
+                OR check_in >= %(final_check_out)s
+                OR check_out > %(final_check_out)s
+                OR check_out <> check_in + 1
+          );
+    """
+
     with pool.connection() as conn:
         with conn.cursor() as cursor:
-            cursor.executemany(query, profiles)
+            cursor.execute(
+                deactivate_query,
+                {
+                    "guest_count": guest_count,
+                    "start_date": start_date,
+                    "final_check_out": final_check_out,
+                },
+            )
+            cursor.executemany(insert_query, profiles)
         conn.commit()
 
     return len(profiles)
@@ -102,7 +136,7 @@ def get_collection_jobs(
     final_check_out: date,
     guest_count: int,
 ) -> list[dict[str, Any]]:
-    """Load every active listing and generated daily profile combination."""
+    """Load every active listing and rolling daily-profile combination."""
 
     query = """
         SELECT
@@ -120,6 +154,7 @@ def get_collection_jobs(
           AND profile.active = TRUE
           AND profile.guest_count = %(guest_count)s
           AND profile.check_in >= %(start_date)s
+          AND profile.check_in < %(final_check_out)s
           AND profile.check_out <= %(final_check_out)s
           AND profile.check_out = profile.check_in + 1
         ORDER BY
